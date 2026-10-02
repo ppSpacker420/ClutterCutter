@@ -183,18 +183,13 @@ jobs:
           python -m pip install pyinstaller
 
       - name: Build the GUI binary
-        run: |
-          pyinstaller --noconfirm --clean --onefile --windowed \
-            --name cluttercutter \
-            --collect-submodules cluttercutter \
-            cluttercutter-gui-entry.py
+        # Written on one line with forward slashes: the default shell on
+        # Windows runners is PowerShell, which does not understand backslash
+        # line continuations. A single line is valid in every shell.
+        run: pyinstaller --noconfirm --clean --onefile --windowed --name cluttercutter --collect-submodules cluttercutter cluttercutter-gui-entry.py
 
       - name: Build the CLI binary
-        run: |
-          pyinstaller --noconfirm --clean --onefile \
-            --name cluttercutter-cli \
-            --collect-submodules cluttercutter \
-            cluttercutter-cli-entry.py
+        run: pyinstaller --noconfirm --clean --onefile --name cluttercutter-cli --collect-submodules cluttercutter cluttercutter-cli-entry.py
 
       - name: Smoke test the CLI binary
         shell: bash
