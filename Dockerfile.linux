@@ -1,0 +1,65 @@
+# Builds a real Linux binary inside a container so the Linux claim can be
+# verified on a Windows machine.
+#
+#   docker build -f Dockerfile.linux -t cluttercutter-linux-build .
+#   docker run --rm -v "$PWD:/out" cluttercutter-linux-build
+#
+# The binary lands in ./out/ on the host.
+
+FROM python:3.12-slim
+
+# tkinter is a system package; it cannot be pip-installed.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3-tk binutils \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+
+COPY pyproject.toml README.md LICENSE ./
+COPY cluttercutter ./cluttercutter
+COPY cluttercutter-gui-entry.py cluttercutter-cli-entry.py ./
+
+RUN pip install --no-cache-dir pyinstaller setuptools
+
+# --- build both binaries ---
+RUN pyinstaller --noconfirm --clean --onefile --windowed \
+        --name cluttercutter \
+        --collect-submodules cluttercutter \
+        cluttercutter-gui-entry.py \
+ && pyinstaller --noconfirm --clean --onefile \
+        --name cluttercutter-cli \
+        --collect-submodules cluttercutter \
+        cluttercutter-cli-entry.py
+
+# --- verify the CLI binary actually works, on Linux ---
+RUN set -eux; \
+    T=$(mktemp -d); \
+    echo hello > "$T/notes.txt"; \
+    ./dist/cluttercutter-cli "$T" | grep -q "DRY RUN"; \
+    test -f "$T/notes.txt"; \
+    test ! -d "$T/Documents"; \
+    ./dist/cluttercutter-cli "$T" --apply --yes | grep -q "Done"; \
+    test -f "$T/Documents/notes.txt"; \
+    echo "Linux binary verified: dry run is safe and apply works"
+
+# --- verify dependency folders survive ---
+RUN set -eux; \
+    T=$(mktemp -d); \
+    mkdir -p "$T/site"; \
+    echo '<link href=style.css>' > "$T/site/index.html"; \
+    echo 'body{}' > "$T/site/style.css"; \
+    echo loose > "$T/loose.pdf"; \
+    ./dist/cluttercutter-cli "$T" --recursive --apply --yes > /dev/null; \
+    test -f "$T/site/index.html"; \
+    test -f "$T/site/style.css"; \
+    echo "Linux binary verified: dependency folders preserved"
+
+# --- verify the test suite passes on Linux (this is the point of the image) ---
+COPY tests ./tests
+RUN pip install --no-cache-dir pytest \
+    && python -m pytest -q --tb=short
+
+# --- ship the artefacts out ---
+RUN mkdir -p /out && cp dist/cluttercutter dist/cluttercutter-cli /out/
+
+CMD ["true"]

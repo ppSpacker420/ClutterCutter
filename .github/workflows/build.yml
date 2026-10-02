@@ -1,0 +1,246 @@
+name: Build and test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # The whole test suite on all three platforms. This is what turns the
+  # "Linux is untested" caveat in the README into a tested claim - it is the
+  # only place the POSIX-only tests ever run.
+  test:
+    name: test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[test]"
+
+      - name: Test
+        run: python -m pytest -q --tb=short
+
+      - name: Check the GUI imports
+        run: python -c "import cluttercutter.gui; print('gui import ok')"
+
+  # Smoke test the actual launchers on Linux, which is the path a Linux user
+  # takes after cloning. Running these is the only way to know they work.
+  linux-launchers:
+    name: linux launcher smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install tkinter
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-tk
+
+      - name: Check the scripts are executable
+        run: |
+          ls -l install.sh cluttercutter.sh cluttercutter-cli.sh
+          test -x install.sh || { echo "install.sh is not executable"; exit 1; }
+          test -x cluttercutter.sh || { echo "cluttercutter.sh is not executable"; exit 1; }
+          test -x cluttercutter-cli.sh || { echo "cluttercutter-cli.sh is not executable"; exit 1; }
+
+      - name: CLI launcher with no arguments shows usage
+        run: |
+          set +e
+          ./cluttercutter-cli.sh
+          status=$?
+          set -e
+          # Exits 2 by design (usage error).
+          if [ "$status" -ne 2 ]; then
+            echo "expected exit 2 from usage, got $status"
+            exit 1
+          fi
+
+      - name: CLI launcher previews without moving anything
+        run: |
+          set -euo pipefail
+          T=$(mktemp -d)
+          echo hello > "$T/notes.txt"
+          echo data  > "$T/photo.jpg"
+          ./cluttercutter-cli.sh "$T" | tee /tmp/out.txt
+          grep -q "DRY RUN" /tmp/out.txt
+          # Nothing may have moved.
+          test -f "$T/notes.txt"
+          test -f "$T/photo.jpg"
+          test ! -d "$T/Documents"
+          echo "dry run is safe: OK"
+
+      - name: CLI launcher actually applies
+        run: |
+          set -euo pipefail
+          T=$(mktemp -d)
+          echo hello > "$T/notes.txt"
+          ./cluttercutter-cli.sh "$T" --apply --yes | tee /tmp/apply.txt
+          grep -q "Done" /tmp/apply.txt
+          test -f "$T/Documents/notes.txt"
+          echo "apply works: OK"
+
+      - name: Dependency folders are left alone
+        run: |
+          set -euo pipefail
+          T=$(mktemp -d)
+          mkdir -p "$T/site"
+          echo '<link href=style.css>' > "$T/site/index.html"
+          echo 'body{}'                  > "$T/site/style.css"
+          echo 'loose'                    > "$T/loose.pdf"
+          ./cluttercutter-cli.sh "$T" --recursive --apply --yes > /dev/null
+          test -f "$T/site/index.html"
+          test -f "$T/site/style.css"
+          echo "dependency folders preserved: OK"
+
+      - name: GUI launcher starts
+        run: |
+          set -euo pipefail
+          # Launch detached, confirm a window appears, then close it.
+          ./cluttercutter.sh &
+          GUI_PID=$!
+          sleep 6
+          if ! kill -0 "$GUI_PID" 2>/dev/null; then
+            echo "GUI exited immediately"
+            exit 1
+          fi
+          kill "$GUI_PID" 2>/dev/null || true
+          echo "GUI launched: OK"
+
+  # Build downloadable binaries. PyInstaller cannot cross-compile, so this has
+  # to run on each target OS - which is also why the binaries are trustworthy:
+  # each is built and smoke-tested on the platform it targets.
+  build:
+    name: build ${{ matrix.os }}
+    needs: [test, linux-launchers]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: cluttercutter-linux
+          - os: windows-latest
+            artifact: cluttercutter-windows
+          - os: macos-latest
+            artifact: cluttercutter-macos
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install tkinter (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y python3-tk
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyinstaller
+
+      - name: Build the GUI binary
+        run: |
+          pyinstaller --noconfirm --clean --onefile --windowed \
+            --name cluttercutter \
+            --collect-submodules cluttercutter \
+            cluttercutter-gui-entry.py
+
+      - name: Build the CLI binary
+        run: |
+          pyinstaller --noconfirm --clean --onefile \
+            --name cluttercutter-cli \
+            --collect-submodules cluttercutter \
+            cluttercutter-cli-entry.py
+
+      - name: Smoke test the CLI binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            BIN="./dist/cluttercutter-cli.exe"
+          else
+            BIN="./dist/cluttercutter-cli"
+          fi
+          chmod +x "$BIN" || true
+          T=$(mktemp -d)
+          echo hello > "$T/notes.txt"
+          # Preview must not move anything.
+          "$BIN" "$T" | grep -q "DRY RUN"
+          test -f "$T/notes.txt"
+          # Apply must move it.
+          "$BIN" "$T" --apply --yes | grep -q "Done"
+          test -f "$T/Documents/notes.txt"
+          echo "binary smoke test passed: OK"
+
+      - name: Upload the binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            dist/cluttercutter-cli
+            dist/cluttercutter-cli.exe
+            dist/cluttercutter
+            dist/cluttercutter.exe
+
+  # Attach the built binaries to a GitHub Release.
+  release:
+    name: attach binaries to release
+    needs: [build]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Assemble release archives
+        run: |
+          set -euo pipefail
+          cd artifacts
+          # Linux
+          if [ -d cluttercutter-linux/dist ]; then
+            cd cluttercutter-linux/dist
+            tar czf ../../cluttercutter-linux-x86_64.tar.gz cluttercutter cluttercutter-cli
+            cd ../..
+          fi
+          # macOS
+          if [ -d cluttercutter-macos/dist ]; then
+            cd cluttercutter-macos/dist
+            tar czf ../../cluttercutter-macos-x86_64.tar.gz cluttercutter cluttercutter-cli
+            cd ../..
+          fi
+          # Windows
+          if [ -d cluttercutter-windows/dist ]; then
+            cd cluttercutter-windows/dist
+            zip -q -r ../../cluttercutter-windows-x86_64.zip cluttercutter.exe cluttercutter-cli.exe
+            cd ../..
+          fi
+          ls -la *.tar.gz *.zip 2>/dev/null || true
+
+      - name: Create the release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            artifacts/cluttercutter-linux-x86_64.tar.gz
+            artifacts/cluttercutter-macos-x86_64.tar.gz
+            artifacts/cluttercutter-windows-x86_64.zip
