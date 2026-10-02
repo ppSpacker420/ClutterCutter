@@ -233,9 +233,32 @@ jobs:
     permissions:
       contents: write
     steps:
+      # Needed to list tags when publishing from a manual dispatch.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history, so tags are present
+
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
+
+      - name: Decide which tag to publish
+        id: tag
+        run: |
+          set -euo pipefail
+          if [ "${{ startsWith(github.ref, 'refs/tags/') }}" = "true" ]; then
+            TAG="${{ github.ref_name }}"
+          else
+            # A manual dispatch points at a branch, so publish the newest tag.
+            TAG="$(git tag --sort=-v:refname | head -n 1)"
+          fi
+          if [ -z "$TAG" ]; then
+            echo "No tag found - create one first:" >&2
+            echo "  git tag -a v1.0.0 -m 'release' && git push origin v1.0.0" >&2
+            exit 1
+          fi
+          echo "Publishing release for tag: $TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Assemble release archives
         run: |
@@ -260,25 +283,6 @@ jobs:
             cd ../..
           fi
           ls -la *.tar.gz *.zip 2>/dev/null || true
-
-      - name: Decide which tag to publish
-        id: tag
-        run: |
-          set -euo pipefail
-          git fetch --tags --quiet || true
-          if [ "${{ startsWith(github.ref, 'refs/tags/') }}" = "true" ]; then
-            TAG="${{ github.ref_name }}"
-          else
-            # A manual dispatch points at a branch, so publish the newest tag.
-            TAG="$(git tag --sort=-v:refname | head -n 1)"
-          fi
-          if [ -z "$TAG" ]; then
-            echo "No tag found - create one first:" >&2
-            echo "  git tag -a v1.0.0 -m 'release' && git push origin v1.0.0" >&2
-            exit 1
-          fi
-          echo "Publishing release for tag: $TAG"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Create the release
         uses: softprops/action-gh-release@v2
