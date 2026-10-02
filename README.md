@@ -149,14 +149,13 @@ Being precise about what has actually been run, because this tool touches real f
 | Windows — CLI, all modes | Verified by execution |
 | Windows — GUI | Verified: launches, renders, plans and applies |
 | Windows — hidden attributes, locked files, collisions | Verified by execution |
-| **Linux** | **Written and reasoned about, but never executed.** No Linux machine was available. |
-| macOS | Untested |
+| **Linux (Ubuntu)** | **Verified in CI.** Full test suite, the shell launchers, and the GUI on a virtual display all pass on `ubuntu-latest`. |
+| **macOS** | **Verified in CI.** Full test suite passes on `macos-latest`. |
 | Cross-device (`EXDEV`) moves | Verified by test injection, not by real hardware |
 | Performance vs. the 10,000-file claim | Not measured |
+| Fedora / Arch / openSUSE | Not tested; the install script gives the tkinter command per distro |
 
-The Linux launchers (`cluttercutter.sh`, `cluttercutter-cli.sh`) are correct by
-inspection only. If you need Linux support, treat it as untested and verify it
-yourself first.
+See [AI_DISCLOSURE.md](AI_DISCLOSURE.md).
 
 ## Documentation
 

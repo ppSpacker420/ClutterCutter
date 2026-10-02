@@ -47,10 +47,10 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install tkinter
+      - name: Install tkinter and a virtual display
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-tk
+          sudo apt-get install -y python3-tk xvfb
 
       - name: Check the scripts are executable
         run: |
@@ -111,16 +111,43 @@ jobs:
       - name: GUI launcher starts
         run: |
           set -euo pipefail
-          # Launch detached, confirm a window appears, then close it.
-          ./cluttercutter.sh &
+          # GitHub runners are headless, so Tk needs a virtual X server.
+          # Without one it fails with "no display name and no $DISPLAY",
+          # which says nothing about whether the launcher works.
+          xvfb-run --auto-servernum --server-args="-screen 0 1024x768x24" \
+            ./cluttercutter.sh &
           GUI_PID=$!
-          sleep 6
+          sleep 8
           if ! kill -0 "$GUI_PID" 2>/dev/null; then
             echo "GUI exited immediately"
             exit 1
           fi
           kill "$GUI_PID" 2>/dev/null || true
-          echo "GUI launched: OK"
+          echo "GUI launched on a virtual display: OK"
+
+      - name: GUI builds a real window and can be scripted
+        # Proves the Tk app constructs and renders, not merely that a process
+        # stays alive. create() and update() do not need mainloop().
+        run: |
+          xvfb-run --auto-servernum --server-args="-screen 0 1024x768x24" \
+            python - <<'PY'
+          import tkinter as tk
+          from cluttercutter.gui import ClutterCutterApp
+
+          app = ClutterCutterApp()
+          app.update_idletasks()
+          app.update()
+
+          # Apply must start disabled: nothing has been scanned yet.
+          assert str(app.apply_btn["state"]) == "disabled", "Apply should start disabled"
+          assert app.plan is None, "a plan should not exist before scanning"
+
+          # Title should be set.
+          assert "ClutterCutter" in app.title(), app.title()
+
+          print("GUI constructed and rendered: OK")
+          app.destroy()
+          PY
 
   # Build downloadable binaries. PyInstaller cannot cross-compile, so this has
   # to run on each target OS - which is also why the binaries are trustworthy:

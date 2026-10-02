@@ -29,13 +29,12 @@ containing real defects. Two specific things a reader should know:
    same system that wrote the code is weaker evidence of correctness than it
    appears. Treat the suite as a starting point, not proof.
 
-2. **The Linux path is unverified.** The code is written to run on both
-   Windows and Linux, and the platform-specific concerns were handled
-   deliberately (Windows file attributes vs POSIX dotfiles, `EXDEV`
-   cross-device renames, case-insensitive collisions). However, **all
-   execution evidence in this repository comes from Windows.** The Linux
-   launchers and the POSIX-only tests have not been exercised on a Linux
-   machine. See the "Verification status" section of the README.
+2. **The Linux support is tested only on Ubuntu.** CI runs the full suite on
+   `ubuntu-latest`, and the launchers and GUI are exercised on a virtual
+   display. Fedora, Arch and openSUSE are **not** tested, and the tkinter
+   package names differ between them. macOS passes the test suite but the
+   launchers are not exercised there. See the "Verification status" section
+   of the README.
 
 ## Safety-critical properties
 
