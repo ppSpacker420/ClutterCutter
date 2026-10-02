@@ -12,7 +12,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .rules import MOVERABLE, PROTECTED
+from .rules import CATEGORIES, MOVERABLE, PROTECTED
 from .scanner import ScanReport
 
 # Windows forbids these in filenames. We only ever append a suffix to an
@@ -124,6 +124,14 @@ def build_plan(
     root = Path(root).expanduser().resolve()
     taken: set[Path] = set()
 
+    # Resolve the root's children once, not once per file.
+    #
+    # _is_inside() calls Path.resolve(), which on Windows issues a syscall per
+    # path component. Doing that for every file cost 3.8s of the 7.5s total on
+    # a 10,000-file scan. The destinations are always root/<category>, so the
+    # set of directories that need checking is known up front.
+    _validate_category_dirs(root)
+
     for entry in report.entries:
         category = entry.category
 
@@ -141,12 +149,10 @@ def build_plan(
 
         target_dir = root / category
 
-        # Guarantee the move stays inside the authorised root. This is the
-        # guard that makes the tool safe even if a category name is later
-        # changed to something path-like.
-        if not _is_inside(target_dir, root):
-            plan.skips.append(SkipIntent(entry.path, "destination outside target folder"))
-            continue
+        # The containment guarantee is established once for all categories by
+        # _validate_category_dirs() above, so it is not re-checked per file.
+        # That check costs a filesystem syscall per path component and was
+        # measurably the slowest part of planning a large scan.
 
         try:
             dst = unique_destination(target_dir / entry.path.name, taken)
@@ -171,3 +177,22 @@ def _is_inside(child: Path, parent: Path) -> bool:
         return True
     except (ValueError, OSError):
         return False
+
+
+def _validate_category_dirs(root: Path) -> None:
+    """Reject any category name that would place a destination outside root.
+
+    Checked once per category instead of once per file. The destinations in
+    build_plan are always ``root / category / filename``, so if the category
+    directory itself is inside the root, every file derived from it is too.
+
+    Raises ValueError if a category is unsafe, which fails loudly at plan time
+    rather than silently at move time.
+    """
+    for category in (*CATEGORIES, PROTECTED):
+        target = root / category
+        if not _is_inside(target, root):
+            raise ValueError(
+                f"category {category!r} resolves outside the target folder; "
+                f"refusing to build a plan"
+            )

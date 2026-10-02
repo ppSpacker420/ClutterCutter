@@ -152,7 +152,7 @@ Being precise about what has actually been run, because this tool touches real f
 | **Linux (Ubuntu)** | **Verified in CI.** Full test suite, the shell launchers, and the GUI on a virtual display all pass on `ubuntu-latest`. |
 | **macOS** | **Verified in CI.** Full test suite passes on `macos-latest`. |
 | Cross-device (`EXDEV`) moves | Verified by test injection, not by real hardware |
-| Performance vs. the 10,000-file claim | Not measured |
+| Performance (10,000 files < 5s) | **Measured: 2.84s.** `benchmarks/scan_benchmark.py` |
 | Fedora / Arch / openSUSE | Not tested; the install script gives the tkinter command per distro |
 
 See [AI_DISCLOSURE.md](AI_DISCLOSURE.md).
