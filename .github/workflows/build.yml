@@ -263,26 +263,43 @@ jobs:
       - name: Assemble release archives
         run: |
           set -euo pipefail
+          # Note: actions/download-artifact strips the upload path, so the
+          # binaries sit directly under artifacts/<name>/, not
+          # artifacts/<name>/dist/. Guard on the binaries themselves rather
+          # than on a directory name, so a layout change fails loudly here
+          # instead of silently publishing an empty release.
           cd artifacts
-          # Linux
-          if [ -d cluttercutter-linux/dist ]; then
-            cd cluttercutter-linux/dist
-            tar czf ../../cluttercutter-linux-x86_64.tar.gz cluttercutter cluttercutter-cli
-            cd ../..
+
+          pack_unix() {
+            local dir="$1" out="$2"
+            if [ -f "$dir/cluttercutter" ] && [ -f "$dir/cluttercutter-cli" ]; then
+              # download-artifact does not preserve the executable bit, so
+              # restore it here - the unpacked binaries would not run.
+              chmod +x "$dir/cluttercutter" "$dir/cluttercutter-cli"
+              tar -czf "$out" -C "$dir" cluttercutter cluttercutter-cli
+              echo "packed $out"
+            else
+              echo "ERROR: expected binaries missing in $dir" >&2
+              ls -la "$dir" >&2 || true
+              exit 1
+            fi
+          }
+
+          pack_unix cluttercutter-linux  cluttercutter-linux-x86_64.tar.gz
+          pack_unix cluttercutter-macos  cluttercutter-macos-x86_64.tar.gz
+
+          if [ -f cluttercutter-windows/cluttercutter.exe ] \
+             && [ -f cluttercutter-windows/cluttercutter-cli.exe ]; then
+            zip -q -r cluttercutter-windows-x86_64.zip cluttercutter-windows
+            echo "packed cluttercutter-windows-x86_64.zip"
+          else
+            echo "ERROR: expected Windows binaries missing" >&2
+            ls -la cluttercutter-windows >&2 || true
+            exit 1
           fi
-          # macOS
-          if [ -d cluttercutter-macos/dist ]; then
-            cd cluttercutter-macos/dist
-            tar czf ../../cluttercutter-macos-x86_64.tar.gz cluttercutter cluttercutter-cli
-            cd ../..
-          fi
-          # Windows
-          if [ -d cluttercutter-windows/dist ]; then
-            cd cluttercutter-windows/dist
-            zip -q -r ../../cluttercutter-windows-x86_64.zip cluttercutter.exe cluttercutter-cli.exe
-            cd ../..
-          fi
-          ls -la *.tar.gz *.zip 2>/dev/null || true
+
+          cd ..
+          ls -la artifacts/*.tar.gz artifacts/*.zip
 
       - name: Create the release
         uses: softprops/action-gh-release@v2
